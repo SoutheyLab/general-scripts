@@ -54,7 +54,7 @@ def iterate_vcf(vcfin, vcfout):
     for line in vcfin:
         # Splitting line
         splitl = line[:-1].split('\t')
-        if splitl[6][0] != 'P': continue
+        # if splitl[6][0] != 'P': continue  # Skip non-pass variants
         varkey = tabjoin(splitl[:5])
         inf = splitl[7].split(';')
         smp = inf[0][7:]
