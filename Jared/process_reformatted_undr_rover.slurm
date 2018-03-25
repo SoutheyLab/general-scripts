@@ -11,6 +11,7 @@
 module load vep/90
 module load gatk/3.7
 module load bcftools/1.7
+module load htslib/1.7
 
 # Variables
 # From the config file
@@ -26,30 +27,32 @@ dbscsnvpath="/projects/vh83/reference/annotation_databases/dbscSNV/dbscSNV1.0-VE
 caddpath="/projects/vh83/reference/annotation_databases/CADD/CADD-v1.3/1000G_phase3.tsv.gz"
 
 # UNDR-ROVER / Input vcf
-undr_rover_vcf="combined_undr_rover.vcf.gz"
-
-# Run python script to convert the UNDR ROVER vcf to a standard format (all genotypes set as het)
-# zcat ${undr_rover_vcf} | python collapse_reformat_undr_rover.py ${undr_rover_vcf%.vcf.gz}.pass.reformat.vcf
-
-# bcftools sort -o ${undr_rover_vcf%.vcf.gz}.pass.reformat.sorted.vcf \
-#     ${undr_rover_vcf%.vcf.gz}.pass.reformat.vcf
-
-# java -jar -Xmx8g /usr/local/gatk/3.7/executable/GenomeAnalysisTK.jar \
-#     -T VariantFiltration -R ${reference} \
-#     -V ${undr_rover_vcf%.vcf.gz}.pass.reformat.sorted.vcf \
-#     -o ${undr_rover_vcf%.vcf.gz}.pass.reformat.sorted.gt-filter.vcf \
-#     -G_filter "g.isHet() == 1 && 1.0 * AB < 25.0" \
-#     -G_filterName "AltFreqLow" \
-#     -G_filter "DP < 25.0" \
-#     -G_filterName "LowDP"
+undr_rover_vcf="path/to/filtered_vcf.vcf"
+orig_undrrover="path/to/original_vcf.vcf"
 
 
+# Sort with bcftools
+bcftools sort ${undr_rover_vcf} | bgzip -c > ${undr_rover_vcf%.vcf}.sort.vcf.gz
+tabix -p vcf ${undr_rover_vcf%.vcf}.sort.vcf.gz
+
+# Genotype filter with gatk
+java -jar -Xmx8g /usr/local/gatk/3.7/executable/GenomeAnalysisTK.jar \
+    -T VariantFiltration -R ${reference} \
+    -V ${undr_rover_vcf%.vcf}.sort.vcf.gz \
+    -G_filter "g.isHet() == 1 && 1.0 * AB < 20.0" \
+    -G_filterName "AltFreqLow" \
+    -G_filter "DP < 25.0" \
+    -G_filterName "LowDP" | \
+    bgzip -c > ${undr_rover_vcf%.vcf}.sort.gt-filter.vcf.gz
+tabix -p vcf ${undr_rover_vcf%.vcf}.sort.gt-filter.vcf.gz
+
+# Annotate with vep
 vep --cache --dir_cache ${other_vep} \
     --assembly GRCh37 --refseq --offline \
     --fasta ${reference} \
     --sift b --polyphen b --symbol --numbers --biotype --total_length --hgvs --format vcf \
     --vcf --force_overwrite --flag_pick --no_stats \
-    --custom ${undr_rover_vcf},undrrover,vcf,exact,0,Sample,PCT,NV,NP \
+    --custom ${orig_undrrover},undrrover,vcf,exact,0,Sample,PCT,NV,NP \
     --custom ${brcaexpath},brcaex,vcf,exact,0,Clinical_significance_ENIGMA,Comment_on_clinical_significance_ENIGMA,Date_last_evaluated_ENIGMA,Pathogenicity_expert,HGVS_cDNA,HGVS_Protein,BIC_Nomenclature \
     --custom ${gnomadpath},gnomAD,vcf,exact,0,AF_NFE,AN_NFE \
     --custom ${revelpath},RVL,vcf,exact,0,REVEL_SCORE \
@@ -58,6 +61,6 @@ vep --cache --dir_cache ${other_vep} \
     --plugin dbNSFP,${dbnsfppath},REVEL_score,REVEL_rankscore \
     --plugin dbscSNV,${dbscsnvpath} \
     --plugin CADD,${caddpath} \
-    --fork 12 \
-    -i ${undr_rover_vcf%.vcf.gz}.pass.reformat.sorted.gt-filter.vcf \
-    -o ${undr_rover_vcf%.vcf.gz}.pass.reformat.sorted.gt-filter.vep-anno.vcf
+    --fork 24 \
+    -i ${undr_rover_vcf%.vcf}.sort.gt-filter.vcf.gz \
+    -o ${undr_rover_vcf%.vcf}.sort.gt-filter.vep-anno.vcf
