@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=annotation
 #SBATCH --account=vh83
-#SBATCH --time=06:00:00
+#SBATCH --time=02:00:00
 #SBATCH --ntasks=1
 #SBATCH --partition=com
 #SBATCH --mem=50000
@@ -47,7 +47,7 @@ vep --cache --dir_cache ${other_vep} \
     --plugin dbNSFP,${dbnsfppath},REVEL_score,REVEL_rankscore \
     --plugin dbscSNV,${dbscsnvpath} \
     --plugin CADD,${caddpath} \
-    --fork 24 \
+    --fork 12 \
     -i ${input_vcf%.vcf.gz}.bgz.vcf.gz \
     -o ${input_vcf%.vcf.gz}.bgz.vep-anno.vcf
 date
