@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=annotation
 #SBATCH --account=vh83
-#SBATCH --time=03:00:00
+#SBATCH --time=04:00:00
 #SBATCH --ntasks=1
 #SBATCH --partition=com
-#SBATCH --mem=16000
-#SBATCH --cpus-per-task=1
+#SBATCH --mem=60000
+#SBATCH --cpus-per-task=12
 
 # Sourcing environment and loading modules
 source /projects/vh83/reference/GEMINI/gemini_env/bin/activate  # Environment for modified GEMINI
@@ -15,7 +15,6 @@ module load gatk/3.7
 module load htslib/1.7
 
 # Variables
-CORES=6
 # From the config file
 reference="/projects/vh83/reference/genomes/b37/bwa_0.7.12_index/human_g1k_v37_decoy.fasta"
 other_vep="/usr/local/vep/90/ensembl-vep/cache"
@@ -29,35 +28,41 @@ dbscsnvpath="/projects/vh83/reference/annotation_databases/dbscSNV/dbscSNV1.0-VE
 caddpath="/projects/vh83/reference/annotation_databases/CADD/CADD-v1.3/1000G_phase3.tsv.gz"
 
 # Input
-input_vcf="path/to/filtered_vcf.vcf"
+# input_vcf="path/to/filtered_vcf.vcf"
+input_vcf="/scratch/vh83/projects/COMPLEXO/from_barcoo/COMPLEXO_all.genotype_Nov24-2017.recal.selected.samplelist.renamecambridge.vcf.gz"
 CURR=${input_vcf}
 
 
-# 1. Re-zipping and indexing with bgzip/tabix
-zcat ${CURR} | bgzip -c > ${CURR%.vcf.gz}.bgz.vcf.gz
-tabix -p vcf ${CURR%.vcf.gz}.bgz.vcf.gz
+# # 1. Re-zipping and indexing with bgzip/tabix
+# zcat ${CURR} | bgzip -c > ${CURR%.vcf.gz}.bgz.vcf.gz
+# tabix -p vcf ${CURR%.vcf.gz}.bgz.vcf.gz
 CURR=${CURR%.vcf.gz}.bgz.vcf.gz
 
+# # 2. Genotype filter with gatk
+# java -jar -Xmx8g /usr/local/gatk/3.7/executable/GenomeAnalysisTK.jar \
+#     -T VariantFiltration -R ${reference} \
+#     -V ${CURR} \
+#     -l ERROR \
+#     -G_filter "g.isHetNonRef() == 1" \
+#     -G_filterName "HetNonRef" \
+#     -G_filter "g.isHet() == 1 && g.isHetNonRef() != 1 && \
+#     1.0 * AD[vc.getAlleleIndex(g.getAlleles().1)] / (DP * 1.0) < 0.20" \
+#     -G_filterName "AltFreqLow" \
+#     -G_filter "DP < 10.0" \
+#     -G_filterName "LowDP" | \
+#     bgzip -c > ${CURR%.vcf.gz}.gt-filter.vcf.gz
+CURR=${CURR%.vcf.gz}.gt-filter.vcf.gz
 
-# 2. Genotype filter with gatk
-java -jar -Xmx8g /usr/local/gatk/3.7/executable/GenomeAnalysisTK.jar \
-    -T VariantFiltration -R ${reference} \
-    -V ${CURR} \
-    -G_filter "g.isHet() == 1 && 1.0 * AB < 20.0" \
-    -G_filterName "AltFreqLow" \
-    -G_filter "DP < 10.0" \
-    -G_filterName "LowDP" | \
-    bgzip -c > ${CURR%.bgz.vcf.gz}.gt-filter.vcf.gz
-CURR=${CURR%.bgz.vcf.gz}.gt-filter.vcf.gz
 
-
-# 3. Decompose multiallelic sites with vt
-vt decompose -s ${CURR} | vt normalize -r ${reference} - | bgzip -c > ${CURR%.vcf.gz}.decomp.norm.vcf.gz
+# # 3. Decompose multiallelic sites with vt
+# vt decompose -s ${CURR} | vt normalize -r ${reference} - | bgzip -c > ${CURR%.vcf.gz}.decomp.norm.vcf.gz
+# tabix -p vcf ${CURR%.vcf.gz}.decomp.norm.vcf.gz
 CURR=${CURR%.vcf.gz}.decomp.norm.vcf.gz
 
 
-# # # # The following steps require multiple cores
-# # 4. Annotate with vep
+# # # The following steps require multiple cores
+CORES=12
+# 4. Annotate with vep
 # vep --cache --dir_cache ${other_vep} \
 #     --assembly GRCh37 --refseq --offline \
 #     --fasta ${reference} \
@@ -74,15 +79,14 @@ CURR=${CURR%.vcf.gz}.decomp.norm.vcf.gz
 #     --fork ${CORES} \
 #     -i ${CURR} \
 #     -o ${CURR%.vcf.gz}.vep-anno.vcf
+CURR=${CURR%.vcf.gz}.vep-anno.vcf
 
 
-# # 5. Find and replace decomposed sites
-# sed -E -e 's|([0-9])/\.|\1/0|g' -e 's|\./([0-9])|0/\1|g' ${CURR} | bgzip -c > ${CURR%.vcf}.f-and-r.vcf.gz
-# tabix -p vcf ${CURR%.vcf}.f-and-r.vcf.gz
-# CURR=${CURR%.vcf}.f-and-r.vcf.gz
-# echo "Sed done."
+# 5. Find and replace decomposed sites
+sed -E -e 's|([0-9])/\.|\1/0|g' -e 's|\./([0-9])|0/\1|g' ${CURR} | bgzip -c > ${CURR%.vcf}.f-and-r.vcf.gz
+tabix -p vcf ${CURR%.vcf}.f-and-r.vcf.gz
+CURR=${CURR%.vcf}.f-and-r.vcf.gz
 
 
 # 6. Load the vcf with GEMINI (note: annotation blocks not decomposed, think it's a bad idea in this context)
 gemini load --skip-gerp-bp --skip-cadd -t VEP --cores ${CORES} -v ${CURR} ${CURR%.vcf.gz}.db
-echo "GEMINI done."
